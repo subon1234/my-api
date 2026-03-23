@@ -6,7 +6,7 @@ const fs = require("fs");
 
 const app = express();
 
-// 📂 Ensure uploads directory exists (Varna error aayega)
+// 📂 Create Uploads Folder if not exists
 const uploadDir = "./uploads";
 if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir);
@@ -16,61 +16,40 @@ app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// 🔐 ADMIN CREDENTIALS
-const ADMIN_USER = "admin";
+// 🔐 ADMIN CONFIG
 const ADMIN_PASS = "subon123";
 
-// 📁 MULTER STORAGE CONFIG
+// 📁 MULTER CONFIG
 const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, uploadDir);
-  },
+  destination: (req, file, cb) => { cb(null, uploadDir); },
   filename: (req, file, cb) => {
-    // Original name clean karke timestamp ke saath save karein
     const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
     cb(null, uniqueSuffix + path.extname(file.originalname));
   }
 });
 
-const upload = multer({ 
-  storage,
-  limits: { fileSize: 100 * 1024 * 1024 } // Limit: 100MB (Render Free tier ke liye safe)
-});
+const upload = multer({ storage });
 
-// 📦 DATABASE SETUP
+// 📦 DATABASE FUNCTIONS
 const DB_FILE = "db.json";
-
 function loadDB() {
   try {
     if (!fs.existsSync(DB_FILE)) return [];
-    const data = fs.readFileSync(DB_FILE);
-    return JSON.parse(data);
-  } catch (err) {
-    return [];
-  }
+    return JSON.parse(fs.readFileSync(DB_FILE));
+  } catch (err) { return []; }
 }
-
 function saveDB(data) {
   fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2));
 }
 
 // --- ROUTES ---
 
-// 🏠 HOME ROUTE (Status Check)
+// 🏠 Status Check
 app.get("/", (req, res) => {
-  res.json({ status: "Online", message: "Anime API is Live 🚀", endpoints: ["/anime", "/files"] });
+  res.send("Anime API is Live & Ready! 🚀");
 });
 
-// 🔐 LOGIN
-app.post("/login", (req, res) => {
-  const { username, password } = req.body;
-  if (username === ADMIN_USER && password === ADMIN_PASS) {
-    return res.json({ success: true, token: ADMIN_PASS }); // Simple token for demo
-  }
-  res.status(401).json({ error: "Invalid login credentials" });
-});
-
-// 🎬 UPLOAD ANIME & EPISODE
+// 🎬 UPLOAD / ADD EPISODE (Main Logic Here)
 app.post("/upload", upload.fields([
   { name: "file", maxCount: 1 },
   { name: "banner", maxCount: 1 }
@@ -80,67 +59,66 @@ app.post("/upload", upload.fields([
     const authHeader = req.headers["x-admin-password"];
 
     if (authHeader !== ADMIN_PASS) {
-      return res.status(403).json({ error: "Unauthorized access" });
+      return res.status(403).json({ error: "Wrong Password! ❌" });
     }
 
     const videoFile = req.files["file"]?.[0]?.filename;
     const bannerFile = req.files["banner"]?.[0]?.filename;
 
     if (!title || !episode || !videoFile) {
-      return res.status(400).json({ error: "Title, Episode, and Video are required" });
+      return res.status(400).json({ error: "Title, Episode, and Video are required!" });
     }
 
     let db = loadDB();
-    let anime = db.find(a => a.title.toLowerCase() === title.toLowerCase());
-
     const host = req.get("host");
     const protocol = req.protocol;
+    
     const videoUrl = `${protocol}://${host}/files/${videoFile}`;
-    const bannerUrl = bannerFile ? `${protocol}://${host}/files/${bannerFile}` : (anime ? anime.banner : null);
+    const bannerUrl = bannerFile ? `${protocol}://${host}/files/${bannerFile}` : null;
+
+    // 🔍 Check if Anime already exists
+    let anime = db.find(a => a.title.toLowerCase() === title.toLowerCase());
 
     if (!anime) {
+      // 🆕 Naya Anime Create Karo
       anime = {
         id: Date.now().toString(),
-        title,
-        banner: bannerUrl,
+        title: title,
+        banner: bannerUrl || "https://via.placeholder.com/400x600?text=No+Banner",
         episodes: []
       };
       db.push(anime);
+    } else {
+      // 🔄 Purane Anime mein Banner update karo agar naya bheja hai
+      if (bannerFile) {
+        anime.banner = bannerUrl;
+      }
     }
 
-    // Add new episode
+    // ➕ Add New Episode to the list
     anime.episodes.push({
       episodeNumber: episode,
       videoUrl: videoUrl,
-      uploadDate: new Date().toISOString()
+      uploadDate: new Date().toLocaleString()
     });
 
     saveDB(db);
-    res.json({ message: "Success! Episode added.", anime: title });
+    res.json({ success: true, message: `Episode ${episode} added to ${title}!` });
 
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Server crashed during upload" });
+    res.status(500).json({ error: "Upload failed on server!" });
   }
 });
 
-// 📂 GET ALL ANIME LIST
+// 📂 Get All Anime
 app.get("/anime", (req, res) => {
   res.json(loadDB());
 });
 
-// 📂 GET SPECIFIC ANIME
-app.get("/anime/:id", (req, res) => {
-    const db = loadDB();
-    const anime = db.find(a => a.id === req.params.id);
-    if (!anime) return res.status(404).json({ error: "Anime not found" });
-    res.json(anime);
-});
-
-// 📁 SERVE STATIC FILES (Videos/Images)
+// 📁 Serve Files
 app.use("/files", express.static(uploadDir));
 
-const PORT = process.env.PORT || 10000; // Render usually uses 10000
+const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
-  console.log(`✅ Server running on port ${PORT}`);
+  console.log(`✅ Server running on http://localhost:${PORT}`);
 });
