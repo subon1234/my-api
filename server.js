@@ -12,32 +12,33 @@ if (!fs.existsSync("uploads")) {
   fs.mkdirSync("uploads");
 }
 
-// 📦 storage setup
+// 📦 storage config
 const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
+  destination: function (req, file, cb) {
     cb(null, "uploads/");
   },
-  filename: (req, file, cb) => {
+  filename: function (req, file, cb) {
     cb(null, Date.now() + path.extname(file.originalname));
   }
 });
 
 const upload = multer({ storage });
 
-// 📤 upload route
+// 🚀 upload route
 app.post("/upload", upload.single("file"), (req, res) => {
   if (!req.file) {
-    return res.status(400).json({ error: "No file uploaded ❌" });
+    return res.status(400).json({ error: "No file uploaded" });
   }
+
+  const fileUrl = `${req.protocol}://${req.get("host")}/files/${req.file.filename}`;
 
   res.json({
     message: "Upload successful 🚀",
-    file: req.file.filename,
-    url: `https://${req.headers.host}/files/${req.file.filename}`
+    url: fileUrl
   });
 });
 
-// 📂 static folder (streaming)
+// 📂 static files (streaming)
 app.use("/files", express.static("uploads"));
 
 // 🧪 test route
@@ -45,13 +46,8 @@ app.get("/", (req, res) => {
   res.send("Upload API Live 🚀");
 });
 
-app.get("/test", (req, res) => {
-  res.json({ message: "API working" });
-});
-
-// 🔥 PORT FIX (Render compatible)
+// ⚡ PORT FIX (IMPORTANT FOR RENDER)
 const PORT = process.env.PORT || 3000;
-
-app.listen(PORT, "0.0.0.0", () => {
-  console.log("Running on port " + PORT);
+app.listen(PORT, () => {
+  console.log("Server running on port " + PORT);
 });
