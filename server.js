@@ -9,7 +9,6 @@ app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// 🔐 ADMIN
 const ADMIN_PASS = "subon123";
 
 // 📁 ensure uploads folder
@@ -17,25 +16,17 @@ if (!fs.existsSync("uploads")) {
   fs.mkdirSync("uploads");
 }
 
-// 📦 storage
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, "uploads/");
-  },
-  filename: (req, file, cb) => {
-    cb(null, Date.now() + path.extname(file.originalname));
-  }
-});
-
-const upload = multer({ storage });
-
 // 📂 DB FILE
 const DB_FILE = "db.json";
 
-// load DB
+// load DB safely
 function loadDB() {
-  if (!fs.existsSync(DB_FILE)) return [];
-  return JSON.parse(fs.readFileSync(DB_FILE));
+  try {
+    if (!fs.existsSync(DB_FILE)) return [];
+    return JSON.parse(fs.readFileSync(DB_FILE));
+  } catch {
+    return []; // corrupt file fix
+  }
 }
 
 // save DB
@@ -43,7 +34,17 @@ function saveDB(data) {
   fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2));
 }
 
-// 🔒 AUTH
+// 📦 multer setup
+const storage = multer.diskStorage({
+  destination: "uploads/",
+  filename: (req, file, cb) => {
+    cb(null, Date.now() + path.extname(file.originalname));
+  }
+});
+
+const upload = multer({ storage });
+
+// 🔐 auth
 function checkAuth(req, res, next) {
   const pass = req.headers["x-admin-password"];
   if (pass !== ADMIN_PASS) {
@@ -52,7 +53,7 @@ function checkAuth(req, res, next) {
   next();
 }
 
-// 🎬 UPLOAD / UPDATE ANIME
+// 🎬 upload route
 app.post("/upload", checkAuth, upload.fields([
   { name: "file", maxCount: 1 },
   { name: "banner", maxCount: 1 }
@@ -62,19 +63,18 @@ app.post("/upload", checkAuth, upload.fields([
     let title = req.body.title?.trim();
     let episode = req.body.episode;
 
-    const video = req.files["file"]?.[0];
-    const banner = req.files["banner"]?.[0];
+    const video = req.files?.file?.[0];
+    const banner = req.files?.banner?.[0];
 
     if (!title || !episode || !video) {
-      return res.status(400).json({ error: "Missing data" });
+      return res.status(400).json({ error: "Missing fields ❌" });
     }
 
     let db = loadDB();
 
-    // find anime
     let anime = db.find(a => a.title === title);
 
-    // create new anime
+    // new anime
     if (!anime) {
       anime = {
         title,
@@ -84,7 +84,7 @@ app.post("/upload", checkAuth, upload.fields([
       db.push(anime);
     }
 
-    // update banner if new uploaded
+    // update banner
     if (banner) {
       anime.banner = banner.filename;
     }
@@ -99,33 +99,29 @@ app.post("/upload", checkAuth, upload.fields([
     saveDB(db);
 
     res.json({
-      message: "Uploaded ✅",
-      title,
-      episode,
-      videoUrl: `https://${req.get("host")}/files/${video.filename}`,
-      banner: anime.banner
+      success: true,
+      message: "Uploaded ✅"
     });
 
   } catch (err) {
-    console.log(err);
-    res.status(500).json({ error: "Server error" });
+    console.log("ERROR:", err);
+    res.status(500).json({ error: "Server error ❌" });
   }
 });
 
-// 📂 GET ALL ANIME
+// 📂 get anime
 app.get("/anime", (req, res) => {
   res.json(loadDB());
 });
 
-// 📂 FILE SERVE
+// 📂 serve files
 app.use("/files", express.static("uploads"));
 
-// 🏠 TEST
+// 🏠 test
 app.get("/", (req, res) => {
-  res.send("Anime API Running 🚀");
+  res.send("API Running 🚀");
 });
 
-// 🚀 START
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log("Server running on port " + PORT);
