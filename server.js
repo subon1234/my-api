@@ -5,123 +5,142 @@ const path = require("path");
 const fs = require("fs");
 
 const app = express();
+
+// 📂 Ensure uploads directory exists (Varna error aayega)
+const uploadDir = "./uploads";
+if (!fs.existsSync(uploadDir)) {
+  fs.mkdirSync(uploadDir);
+}
+
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// 🔐 ADMIN LOGIN
+// 🔐 ADMIN CREDENTIALS
 const ADMIN_USER = "admin";
 const ADMIN_PASS = "subon123";
 
-// 📁 storage
+// 📁 MULTER STORAGE CONFIG
 const storage = multer.diskStorage({
-  destination: "./uploads",
+  destination: (req, file, cb) => {
+    cb(null, uploadDir);
+  },
   filename: (req, file, cb) => {
-    cb(null, Date.now() + path.extname(file.originalname));
+    // Original name clean karke timestamp ke saath save karein
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    cb(null, uniqueSuffix + path.extname(file.originalname));
   }
 });
 
-const upload = multer({ storage });
+const upload = multer({ 
+  storage,
+  limits: { fileSize: 100 * 1024 * 1024 } // Limit: 100MB (Render Free tier ke liye safe)
+});
 
-// 📦 simple DB (JSON)
+// 📦 DATABASE SETUP
 const DB_FILE = "db.json";
 
 function loadDB() {
-  if (!fs.existsSync(DB_FILE)) return [];
-  return JSON.parse(fs.readFileSync(DB_FILE));
+  try {
+    if (!fs.existsSync(DB_FILE)) return [];
+    const data = fs.readFileSync(DB_FILE);
+    return JSON.parse(data);
+  } catch (err) {
+    return [];
+  }
 }
 
 function saveDB(data) {
   fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2));
 }
 
-// 🔐 login route
-app.post("/login", (req, res) => {
-  const { username, password } = req.body;
+// --- ROUTES ---
 
-  if (username === ADMIN_USER && password === ADMIN_PASS) {
-    return res.json({ success: true });
-  }
-
-  res.status(401).json({ error: "Invalid login" });
+// 🏠 HOME ROUTE (Status Check)
+app.get("/", (req, res) => {
+  res.json({ status: "Online", message: "Anime API is Live 🚀", endpoints: ["/anime", "/files"] });
 });
 
-// 🔒 auth middleware
-function checkAuth(req, res, next) {
-  const pass = req.headers["x-admin-password"];
-
-  if (pass !== ADMIN_PASS) {
-    return res.status(403).json({ error: "Unauthorized ❌" });
+// 🔐 LOGIN
+app.post("/login", (req, res) => {
+  const { username, password } = req.body;
+  if (username === ADMIN_USER && password === ADMIN_PASS) {
+    return res.json({ success: true, token: ADMIN_PASS }); // Simple token for demo
   }
+  res.status(401).json({ error: "Invalid login credentials" });
+});
 
-  next();
-}
-
-// 🎬 upload anime + episode
-app.post("/upload", checkAuth, upload.fields([
+// 🎬 UPLOAD ANIME & EPISODE
+app.post("/upload", upload.fields([
   { name: "file", maxCount: 1 },
   { name: "banner", maxCount: 1 }
 ]), (req, res) => {
   try {
     const { title, episode } = req.body;
+    const authHeader = req.headers["x-admin-password"];
 
-    const video = req.files["file"]?.[0]?.filename;
-    const banner = req.files["banner"]?.[0]?.filename;
+    if (authHeader !== ADMIN_PASS) {
+      return res.status(403).json({ error: "Unauthorized access" });
+    }
 
-    if (!title || !episode || !video) {
-      return res.status(400).json({ error: "Missing data" });
+    const videoFile = req.files["file"]?.[0]?.filename;
+    const bannerFile = req.files["banner"]?.[0]?.filename;
+
+    if (!title || !episode || !videoFile) {
+      return res.status(400).json({ error: "Title, Episode, and Video are required" });
     }
 
     let db = loadDB();
+    let anime = db.find(a => a.title.toLowerCase() === title.toLowerCase());
 
-    // anime find
-    let anime = db.find(a => a.title === title);
+    const host = req.get("host");
+    const protocol = req.protocol;
+    const videoUrl = `${protocol}://${host}/files/${videoFile}`;
+    const bannerUrl = bannerFile ? `${protocol}://${host}/files/${bannerFile}` : (anime ? anime.banner : null);
 
     if (!anime) {
       anime = {
+        id: Date.now().toString(),
         title,
-        banner,
+        banner: bannerUrl,
         episodes: []
       };
       db.push(anime);
     }
 
-    // add episode
+    // Add new episode
     anime.episodes.push({
-      episode,
-      video,
-      url: `${req.protocol}://${req.get("host")}/files/${video}`
+      episodeNumber: episode,
+      videoUrl: videoUrl,
+      uploadDate: new Date().toISOString()
     });
 
     saveDB(db);
-
-    res.json({
-      message: "Anime uploaded 🚀",
-      title,
-      episode,
-      videoUrl: `${req.protocol}://${req.get("host")}/files/${video}`,
-      bannerUrl: banner ? `${req.protocol}://${req.get("host")}/files/${banner}` : null
-    });
+    res.json({ message: "Success! Episode added.", anime: title });
 
   } catch (err) {
-    res.status(500).json({ error: "Server error" });
+    console.error(err);
+    res.status(500).json({ error: "Server crashed during upload" });
   }
 });
 
-// 📂 get all anime
+// 📂 GET ALL ANIME LIST
 app.get("/anime", (req, res) => {
   res.json(loadDB());
 });
 
-// 📂 static files
-app.use("/files", express.static("uploads"));
-
-// 🏠 home
-app.get("/", (req, res) => {
-  res.send("Anime API Live 🚀");
+// 📂 GET SPECIFIC ANIME
+app.get("/anime/:id", (req, res) => {
+    const db = loadDB();
+    const anime = db.find(a => a.id === req.params.id);
+    if (!anime) return res.status(404).json({ error: "Anime not found" });
+    res.json(anime);
 });
 
-const PORT = process.env.PORT || 3000;
+// 📁 SERVE STATIC FILES (Videos/Images)
+app.use("/files", express.static(uploadDir));
+
+const PORT = process.env.PORT || 10000; // Render usually uses 10000
 app.listen(PORT, () => {
-  console.log("Server running on port " + PORT);
+  console.log(`✅ Server running on port ${PORT}`);
 });
