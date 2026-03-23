@@ -6,7 +6,7 @@ const path = require("path");
 const app = express();
 app.use(cors());
 
-// 📁 storage
+// storage
 const storage = multer.diskStorage({
   destination: "./uploads",
   filename: (req, file, cb) => {
@@ -16,27 +16,24 @@ const storage = multer.diskStorage({
 
 const upload = multer({ storage });
 
-// ✅ IMPORTANT ROUTE
+// upload route
 app.post("/upload", upload.single("file"), (req, res) => {
-  if (!req.file) {
-    return res.status(400).json({ error: "No file" });
-  }
-
-  const fileUrl = req.protocol + "://" + req.get("host") + "/files/" + req.file.filename;
-
   res.json({
-    message: "Upload success 🚀",
-    url: fileUrl
+    message: "Upload successful 🚀",
+    file: req.file.filename,
+    url: `https://${req.headers.host}/files/${req.file.filename}`
   });
 });
 
-// static
+// static folder
 app.use("/files", express.static("uploads"));
 
-// test
+// home
 app.get("/", (req, res) => {
-  res.send("API LIVE 🚀");
+  res.send("Upload API Live 🚀");
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log("Running..."));
+app.listen(PORT, () => {
+  console.log("Server running...");
+});
