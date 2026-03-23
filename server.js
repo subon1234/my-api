@@ -1,82 +1,132 @@
 const express = require("express");
 const cors = require("cors");
-const path = require("path");
+const multer = require("multer");
 const fs = require("fs");
+const path = require("path");
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// 🔐 ADMIN CONFIG
+// 🔐 ADMIN
 const ADMIN_PASS = "subon123";
+
+// 📁 ensure uploads folder
+if (!fs.existsSync("uploads")) {
+  fs.mkdirSync("uploads");
+}
+
+// 📦 storage
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, "uploads/");
+  },
+  filename: (req, file, cb) => {
+    cb(null, Date.now() + path.extname(file.originalname));
+  }
+});
+
+const upload = multer({ storage });
+
+// 📂 DB FILE
 const DB_FILE = "db.json";
 
-// 📦 DATABASE FUNCTIONS
+// load DB
 function loadDB() {
-  try {
-    if (!fs.existsSync(DB_FILE)) return [];
-    return JSON.parse(fs.readFileSync(DB_FILE));
-  } catch (err) { return []; }
+  if (!fs.existsSync(DB_FILE)) return [];
+  return JSON.parse(fs.readFileSync(DB_FILE));
 }
+
+// save DB
 function saveDB(data) {
   fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2));
 }
 
-// 🏠 Status Check
-app.get("/", (req, res) => {
-  res.json({ status: "Live", message: "Anime API Ready 🚀" });
-});
+// 🔒 AUTH
+function checkAuth(req, res, next) {
+  const pass = req.headers["x-admin-password"];
+  if (pass !== ADMIN_PASS) {
+    return res.status(403).json({ error: "Unauthorized ❌" });
+  }
+  next();
+}
 
-// 🎬 ADD EPISODE VIA DIRECT LINK (Safe for Render)
-app.post("/upload-link", (req, res) => {
+// 🎬 UPLOAD / UPDATE ANIME
+app.post("/upload", checkAuth, upload.fields([
+  { name: "file", maxCount: 1 },
+  { name: "banner", maxCount: 1 }
+]), (req, res) => {
+
   try {
-    const { title, episode, videoUrl, bannerUrl } = req.body;
-    const authHeader = req.headers["x-admin-password"];
+    let title = req.body.title?.trim();
+    let episode = req.body.episode;
 
-    if (authHeader !== ADMIN_PASS) {
-      return res.status(403).json({ error: "Wrong Password! ❌" });
-    }
+    const video = req.files["file"]?.[0];
+    const banner = req.files["banner"]?.[0];
 
-    if (!title || !episode || !videoUrl) {
-      return res.status(400).json({ error: "Title, Episode, and Link are required!" });
+    if (!title || !episode || !video) {
+      return res.status(400).json({ error: "Missing data" });
     }
 
     let db = loadDB();
-    let anime = db.find(a => a.title.toLowerCase() === title.toLowerCase());
 
+    // find anime
+    let anime = db.find(a => a.title === title);
+
+    // create new anime
     if (!anime) {
       anime = {
-        id: Date.now().toString(),
-        title: title,
-        banner: bannerUrl || "https://via.placeholder.com/400x600?text=No+Banner",
+        title,
+        banner: banner ? banner.filename : "",
         episodes: []
       };
       db.push(anime);
-    } else if (bannerUrl) {
-      anime.banner = bannerUrl;
     }
 
+    // update banner if new uploaded
+    if (banner) {
+      anime.banner = banner.filename;
+    }
+
+    // add episode
     anime.episodes.push({
-      episodeNumber: episode,
-      videoUrl: videoUrl, // Streaming Link
-      uploadDate: new Date().toLocaleString()
+      episode,
+      video: video.filename,
+      url: `https://${req.get("host")}/files/${video.filename}`
     });
 
     saveDB(db);
-    res.json({ success: true, message: `Episode ${episode} added to ${title}!` });
+
+    res.json({
+      message: "Uploaded ✅",
+      title,
+      episode,
+      videoUrl: `https://${req.get("host")}/files/${video.filename}`,
+      banner: anime.banner
+    });
 
   } catch (err) {
-    res.status(500).json({ error: "Server Error!" });
+    console.log(err);
+    res.status(500).json({ error: "Server error" });
   }
 });
 
-// 📂 Get All Anime
+// 📂 GET ALL ANIME
 app.get("/anime", (req, res) => {
   res.json(loadDB());
 });
 
-const PORT = process.env.PORT || 10000;
+// 📂 FILE SERVE
+app.use("/files", express.static("uploads"));
+
+// 🏠 TEST
+app.get("/", (req, res) => {
+  res.send("Anime API Running 🚀");
+});
+
+// 🚀 START
+const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`✅ Server running on port ${PORT}`);
+  console.log("Server running on port " + PORT);
 });
