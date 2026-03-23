@@ -7,6 +7,11 @@ const fs = require("fs");
 const app = express();
 app.use(cors());
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
+// 🔐 ADMIN LOGIN
+const ADMIN_USER = "admin";
+const ADMIN_PASS = "subon123";
 
 // 📁 storage
 const storage = multer.diskStorage({
@@ -18,7 +23,7 @@ const storage = multer.diskStorage({
 
 const upload = multer({ storage });
 
-// 📦 simple DB (json file)
+// 📦 simple DB (JSON)
 const DB_FILE = "db.json";
 
 function loadDB() {
@@ -30,8 +35,30 @@ function saveDB(data) {
   fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2));
 }
 
-// 🎬 upload anime / episode
-app.post("/upload", upload.fields([
+// 🔐 login route
+app.post("/login", (req, res) => {
+  const { username, password } = req.body;
+
+  if (username === ADMIN_USER && password === ADMIN_PASS) {
+    return res.json({ success: true });
+  }
+
+  res.status(401).json({ error: "Invalid login" });
+});
+
+// 🔒 auth middleware
+function checkAuth(req, res, next) {
+  const pass = req.headers["x-admin-password"];
+
+  if (pass !== ADMIN_PASS) {
+    return res.status(403).json({ error: "Unauthorized ❌" });
+  }
+
+  next();
+}
+
+// 🎬 upload anime + episode
+app.post("/upload", checkAuth, upload.fields([
   { name: "file", maxCount: 1 },
   { name: "banner", maxCount: 1 }
 ]), (req, res) => {
@@ -42,12 +69,12 @@ app.post("/upload", upload.fields([
     const banner = req.files["banner"]?.[0]?.filename;
 
     if (!title || !episode || !video) {
-      return res.status(400).json({ error: "title, episode, file required" });
+      return res.status(400).json({ error: "Missing data" });
     }
 
     let db = loadDB();
 
-    // 🔍 anime search
+    // anime find
     let anime = db.find(a => a.title === title);
 
     if (!anime) {
@@ -59,20 +86,21 @@ app.post("/upload", upload.fields([
       db.push(anime);
     }
 
-    // 🎞️ add episode
+    // add episode
     anime.episodes.push({
       episode,
       video,
-      url: `https://${req.headers.host}/files/${video}`
+      url: `${req.protocol}://${req.get("host")}/files/${video}`
     });
 
     saveDB(db);
 
     res.json({
-      message: "Episode added 🚀",
+      message: "Anime uploaded 🚀",
       title,
       episode,
-      url: `https://${req.headers.host}/files/${video}`
+      videoUrl: `${req.protocol}://${req.get("host")}/files/${video}`,
+      bannerUrl: banner ? `${req.protocol}://${req.get("host")}/files/${banner}` : null
     });
 
   } catch (err) {
@@ -85,7 +113,7 @@ app.get("/anime", (req, res) => {
   res.json(loadDB());
 });
 
-// 📂 streaming
+// 📂 static files
 app.use("/files", express.static("uploads"));
 
 // 🏠 home
@@ -95,5 +123,5 @@ app.get("/", (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log("Running on port " + PORT);
+  console.log("Server running on port " + PORT);
 });
