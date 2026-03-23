@@ -16,28 +16,27 @@ const storage = multer.diskStorage({
 
 const upload = multer({ storage });
 
-// ✅ upload route
+// ✅ IMPORTANT ROUTE
 app.post("/upload", upload.single("file"), (req, res) => {
   if (!req.file) {
-    return res.status(400).json({ error: "No file uploaded" });
+    return res.status(400).json({ error: "No file" });
   }
 
-  // 🔥 FIXED URL
   const fileUrl = req.protocol + "://" + req.get("host") + "/files/" + req.file.filename;
 
   res.json({
-    message: "Upload successful 🚀",
+    message: "Upload success 🚀",
     url: fileUrl
   });
 });
 
-// 📂 static files
+// static
 app.use("/files", express.static("uploads"));
 
 // test
 app.get("/", (req, res) => {
-  res.send("Upload API Live 🚀");
+  res.send("API LIVE 🚀");
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log("Running on port", PORT));
+app.listen(PORT, () => console.log("Running..."));
